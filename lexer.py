@@ -215,13 +215,13 @@ class Lexer:
         elif next_char == "s":
             self.advance()
             return Token(TokenType.WHITESPACE, r"\s", start_pos)
-        elif next_char == "D":
+        elif next_char == "S":
             self.advance()
             return Token(TokenType.NON_WHITESPACE, r"\S", start_pos)
         elif next_char == "b":
             self.advance()
             return Token(TokenType.WORD_BOUNDARY, r"\b", start_pos)
-        elif next_char == "b":
+        elif next_char == "B":
             self.advance()
             return Token(TokenType.NON_WORD_BOUNDARY, r"\B", start_pos)
         elif next_char.isdigit():
@@ -246,7 +246,7 @@ class Lexer:
         start_pos = self.pos
         self.advance()
 
-        if self.current_char == "?":
+        if self.current_char() == "?":
             self.advance()
 
             next_char = self.current_char()
@@ -279,7 +279,3 @@ class Lexer:
                 )
 
         return Token(TokenType.LPAREN, "(", start_pos)
-
-
-lexer = Lexer(r"a\d{1}(?:foo|bar)?")
-print(lexer.tokenize())
