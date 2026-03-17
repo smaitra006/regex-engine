@@ -1,10 +1,9 @@
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 
 class TokenType(Enum):
-
     CHAR = auto()  # regular character (A-Z, a-z, 0-9, etc)
 
     STAR = (
@@ -73,7 +72,7 @@ class TokenType(Enum):
     )
 
     # word boundaru -> matches the position b/w word and non-word, also start/end of string
-    # \bboy\b -> matches cat in "Hello boy here" but not in "Hello tomboy here"
+    # \bboy\b -> matches boy in "Hello boy here" but not in "Hello tomboy here"
     WORD_BOUNDARY = auto()  # \b
     NON_WORD_BOUNDARY = auto()  # \B
 
@@ -111,6 +110,25 @@ class Token:
 
 
 class Lexer:
+    # 1. Lookup table for simple, single-character tokens (O(1) lookup)
+    SIMPLE_TOKENS: Dict[str, TokenType] = {
+        "*": TokenType.STAR,
+        "+": TokenType.PLUS,
+        "?": TokenType.QUESTION,
+        "{": TokenType.LBRACE,
+        "}": TokenType.RBRACE,
+        ",": TokenType.COMMA,
+        "|": TokenType.PIPE,
+        # '(' is handled separately in _handle_group_start
+        ")": TokenType.RPAREN,
+        "[": TokenType.LBRACKET,
+        "]": TokenType.RBRACKET,
+        "^": TokenType.CARET,
+        "$": TokenType.DOLLAR,
+        ".": TokenType.DOT,
+        "-": TokenType.DASH,
+    }
+
     def __init__(self, pattern: str):
         self.pattern = pattern
         self.pos = 0
@@ -137,51 +155,11 @@ class Lexer:
                 token = self._handle_escape()
                 if token:
                     tokens.append(token)
-                continue
-            elif char == "*":
-                tokens.append(Token(TokenType.STAR, char, start_pos))
-                self.advance()
-            elif char == "+":
-                tokens.append(Token(TokenType.PLUS, char, start_pos))
-                self.advance()
-            elif char == "?":
-                tokens.append(Token(TokenType.QUESTION, char, start_pos))
-                self.advance()
-            elif char == "{":
-                tokens.append(Token(TokenType.LBRACE, char, start_pos))
-                self.advance()
-            elif char == "}":
-                tokens.append(Token(TokenType.RBRACE, char, start_pos))
-                self.advance()
-            elif char == ",":
-                tokens.append(Token(TokenType.COMMA, char, start_pos))
-                self.advance()
-            elif char == "|":
-                tokens.append(Token(TokenType.PIPE, char, start_pos))
-                self.advance()
             elif char == "(":
-                token = self._handle_group_start()
-                tokens.append(token)
-            elif char == ")":
-                tokens.append(Token(TokenType.RPAREN, char, start_pos))
-                self.advance()
-            elif char == "[":
-                tokens.append(Token(TokenType.LBRACKET, char, start_pos))
-                self.advance()
-            elif char == "]":
-                tokens.append(Token(TokenType.RBRACKET, char, start_pos))
-                self.advance()
-            elif char == "^":
-                tokens.append(Token(TokenType.CARET, char, start_pos))
-                self.advance()
-            elif char == "$":
-                tokens.append(Token(TokenType.DOLLAR, char, start_pos))
-                self.advance()
-            elif char == ".":
-                tokens.append(Token(TokenType.DOT, char, start_pos))
-                self.advance()
-            elif char == "-":
-                tokens.append(Token(TokenType.DASH, char, start_pos))
+                tokens.append(self._handle_group_start())
+            elif char in self.SIMPLE_TOKENS:
+                # Replaces the massive if/elif chain
+                tokens.append(Token(self.SIMPLE_TOKENS[char], char, start_pos))
                 self.advance()
             else:
                 tokens.append(Token(TokenType.CHAR, char, start_pos))
@@ -190,65 +168,53 @@ class Lexer:
         tokens.append(Token(TokenType.EOF, None, self.pos))
         return tokens
 
-    def _handle_escape(self) -> Optional[str]:
+    # Fixed return type to Token instead of Optional[str]
+    def _handle_escape(self) -> Token:
         start_pos = self.pos
-        prev_char = self.advance()
+        self.advance()  # Consume the '\'
 
         next_char = self.current_char()
         if next_char is None:
             raise ValueError(
-                f"Pattern cannot end with backslash at position {start_pos}"
-            )
+                f"Pattern cannot end with backslash at position {start_pos}")
 
-        if next_char == "d":
-            self.advance()
-            return Token(TokenType.DIGIT, r"\d", start_pos)
-        elif next_char == "D":
-            self.advance()
-            return Token(TokenType.NON_DIGIT, r"\D", start_pos)
-        elif next_char == "w":
-            self.advance()
-            return Token(TokenType.WORD, r"\w", start_pos)
-        elif next_char == "W":
-            self.advance()
-            return Token(TokenType.NON_WORD, r"\W", start_pos)
-        elif next_char == "s":
-            self.advance()
-            return Token(TokenType.WHITESPACE, r"\s", start_pos)
-        elif next_char == "S":
-            self.advance()
-            return Token(TokenType.NON_WHITESPACE, r"\S", start_pos)
-        elif next_char == "b":
-            self.advance()
-            return Token(TokenType.WORD_BOUNDARY, r"\b", start_pos)
-        elif next_char == "B":
-            self.advance()
-            return Token(TokenType.NON_WORD_BOUNDARY, r"\B", start_pos)
+        self.advance()  # Consume the escaped character once here, instead of in every if-branch
+
+        # 2. Map for escape sequences
+        escape_map = {
+            "d": (TokenType.DIGIT, r"\d"),
+            "D": (TokenType.NON_DIGIT, r"\D"),
+            "w": (TokenType.WORD, r"\w"),
+            "W": (TokenType.NON_WORD, r"\W"),
+            "s": (TokenType.WHITESPACE, r"\s"),
+            "S": (TokenType.NON_WHITESPACE, r"\S"),
+            "b": (TokenType.WORD_BOUNDARY, r"\b"),
+            "B": (TokenType.NON_WORD_BOUNDARY, r"\B"),
+            "n": (TokenType.CHAR, "\n"),
+            # Fixed r"\t" to "\t" so it actually parses as a tab
+            "t": (TokenType.CHAR, "\t"),
+            "r": (TokenType.CHAR, "\r"),
+        }
+
+        if next_char in escape_map:
+            tok_type, val = escape_map[next_char]
+            return Token(tok_type, val, start_pos)
+
         elif next_char.isdigit():
-            num = ""
+            num = next_char
             while self.current_char() and self.current_char().isdigit():
                 num += self.advance()
             return Token(TokenType.BACKREF, num, start_pos)
-        elif next_char == "n":
-            self.advance()
-            return Token(TokenType.CHAR, "\n", start_pos)
-        elif next_char == "t":
-            self.advance()
-            return Token(TokenType.CHAR, r"\t", start_pos)
-        elif next_char == "r":
-            self.advance()
-            return Token(TokenType.CHAR, r"\r", start_pos)
         else:
-            self.advance()
+            # Handles escaped literals like \* or \+
             return Token(TokenType.CHAR, next_char, start_pos)
 
     def _handle_group_start(self) -> Token:
         start_pos = self.pos
-        self.advance()
+        self.advance()  # Consume '('
 
         if self.current_char() == "?":
-            self.advance()
-
+            self.advance()  # Consume '?'
             next_char = self.current_char()
 
             if next_char == ":":
@@ -272,10 +238,9 @@ class Lexer:
                     return Token(TokenType.LOOKBEHIND_NEG, "(?<!", start_pos)
                 else:
                     raise ValueError(
-                        f"Inalid group syntax at position {start_pos}")
+                        f"Invalid group syntax at position {start_pos}")
             else:
                 raise ValueError(
-                    f"Unkown group modifier '?{next_char}' at position {start_pos}"
-                )
+                    f"Unknown group modifier '?{next_char}' at position {start_pos}")
 
         return Token(TokenType.LPAREN, "(", start_pos)
